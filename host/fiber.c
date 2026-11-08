@@ -58,7 +58,7 @@ typedef void *NativeFiber;
 /* A UWP app's headers leave the fibers out (the desktop's family); the
  * system has them, and the Xbox build links them from kernel32.lib
  * (host/xbox/CMakeLists.txt). */
-WINBASEAPI LPVOID WINAPI ConvertThreadToFiber(LPVOID param);
+WINBASEAPI LPVOID WINAPI ConvertThreadToFiberEx(LPVOID param, DWORD flags);
 WINBASEAPI LPVOID WINAPI CreateFiberEx(SIZE_T commit, SIZE_T reserve, DWORD flags,
                                        VOID (WINAPI *start)(LPVOID), LPVOID param);
 WINBASEAPI VOID WINAPI SwitchToFiber(LPVOID fiber);
@@ -107,7 +107,12 @@ static VOID CALLBACK fiber_proc(LPVOID p)
 
 void host_fibers_init(void)
 {
+#if defined(EIDOS_XBOX)
+    /* the Ex form is the one a UWP app's API sets carry */
+    g_fib[0].fiber = ConvertThreadToFiberEx(NULL, 0);
+#else
     g_fib[0].fiber = ConvertThreadToFiber(NULL);
+#endif
     if (g_fib[0].fiber == NULL) {
         fprintf(stderr, "eidos_host: no fibers (%lu)\n", (unsigned long)GetLastError());
         exit(1);
