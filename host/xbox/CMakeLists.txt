@@ -20,6 +20,10 @@
 # tools/xbox_package.py then makes the two packages from the program.
 
 cmake_minimum_required(VERSION 3.20)
+# a UWP program's system library is WindowsApp.lib, not kernel32.lib and the
+# rest (the store CRT needs RoInitialize from it): CMake's own compiler
+# check links with these too
+set(CMAKE_C_STANDARD_LIBRARIES "WindowsApp.lib" CACHE STRING "" FORCE)
 project(eidos_xbox C)
 
 set(EIDOS_GAME_DIR "" CACHE PATH "a host build holding game_*.c, game.h and gl_imports.c")
@@ -51,7 +55,6 @@ add_compile_definitions(WINAPI_FAMILY=WINAPI_FAMILY_APP _CRT_SECURE_NO_WARNINGS
 add_compile_options(/std:c17 /utf-8 /MD /W1 /wd4005)
 add_link_options(/APPCONTAINER /NODEFAULTLIB:kernel32.lib /NODEFAULTLIB:user32.lib
     /NODEFAULTLIB:ole32.lib /DYNAMICBASE /NXCOMPAT /DEBUG /OPT:REF /OPT:ICF)
-link_libraries(WindowsApp.lib)
 
 # ------------------------------------------------------------ SDL2's half
 add_library(eidos_sdl2 SHARED ${_sw}/sdl2_side.c)
