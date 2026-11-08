@@ -40,6 +40,14 @@
 #include <fcntl.h>
 #include <unistd.h>
 #endif
+/* The Xbox too (docs/xbox.md): a UWP app, whose entry is SDL2's
+ * (host/xbox/xbox_host.c) and whose folder is its package's LocalState. */
+#if defined(EIDOS_XBOX)
+#define HOST_MOBILE 1
+#include <fcntl.h>
+#include <io.h>
+#define main host_xbox_main
+#endif
 
 #include "host.h"
 #include "picker.h"
@@ -92,7 +100,7 @@ u32 w2c_eidos_pick_rom(struct w2c_eidos *e, u32 title, u32 out, u32 n)
 void w2c_eidos_console_open(struct w2c_eidos *e)
 {
     (void)e;
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(EIDOS_XBOX)
     if (GetConsoleWindow() != NULL) {
         return;                         /* started from a terminal */
     }
@@ -254,7 +262,7 @@ u32 w2c_eidos_os_path(struct w2c_eidos *e, u32 kind, u32 out, u32 n)
 void host_trap(wasm_rt_trap_t code)
 {
     fprintf(stderr, "eidos: the game stopped (wasm trap: %s)\n", wasm_rt_strerror(code));
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(EIDOS_XBOX)
     {
         void *frames[48];
         unsigned short n = CaptureStackBackTrace(0, 48, frames, NULL);
@@ -277,7 +285,7 @@ void host_trap(wasm_rt_trap_t code)
     exit(3);
 }
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(EIDOS_XBOX)
 /* A fault outside a wasm trap (the host's own code, a driver): where it
  * happened and the native frames, the way host_trap reports. */
 static LONG WINAPI host_fault(EXCEPTION_POINTERS *ep)
@@ -301,7 +309,7 @@ static LONG WINAPI host_fault(EXCEPTION_POINTERS *ep)
 }
 #endif
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(EIDOS_XBOX)
 #include <dbghelp.h>
 
 /* EIDOS_HOST_STALL=<seconds>: after that long, the frames the main thread
@@ -404,7 +412,9 @@ static char **mobile_args(int *argc)
     /* A phone draws with OpenGL ES and is played by touch: the hints show the DS's own button
      * letters (a connected pad still shows its own).  Android's curved
      * screens also get a margin of 2% a side inside the safe area. */
+#if !defined(EIDOS_XBOX)    /* the Xbox is played with its controller */
     setenv("EIDOS_TOUCH_DEVICE", "1", 1);
+#endif
     /* the 3D renderer's choices for OpenGL ES (engine/platform/plat_gl3d.c) */
 #if !defined(__SWITCH__)    /* the Switch tries desktop OpenGL first (host/sdl.c) */
     setenv("EIDOS_GL_ES", "1", 1);
@@ -416,6 +426,19 @@ static char **mobile_args(int *argc)
     /* the first-run screen names the ROM's folder (host/pick_switch.c) */
     setenv("EIDOS_CONSOLE", "Switch", 1);
     setenv("EIDOS_ROM_FOLDER", "sdmc:/switch/eidos/", 1);
+#endif
+#if defined(EIDOS_XBOX)
+    {
+        /* the first-run screen names the app's folder, where the Device
+         * Portal's file explorer uploads the ROM (host/xbox/xbox_host.c) */
+        static char where[1400];
+        const char *ed = host_xbox_edition();
+
+        snprintf(where, sizeof where, "%s\n(Device Portal > File explorer > LocalAppData > "
+                 "the Pokemon%s package > LocalState)", pref, ed);
+        setenv("EIDOS_CONSOLE", "Xbox", 1);
+        setenv("EIDOS_ROM_FOLDER", where, 1);
+    }
 #endif
     snprintf(file, sizeof file, "%senv.txt", pref);
     if ((f = fopen(file, "r")) != NULL) {
@@ -543,7 +566,7 @@ int main(int argc, char **argv)
 
 static int host_run(int argc, char **argv)
 {
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(EIDOS_XBOX)
     if (getenv("EIDOS_HOST_STALL") != NULL) {
         DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(),
                         &g_main_thread, 0, FALSE, DUPLICATE_SAME_ACCESS);
@@ -551,7 +574,7 @@ static int host_run(int argc, char **argv)
                      (LPVOID)(uintptr_t)atoi(getenv("EIDOS_HOST_STALL")), 0, NULL);
     }
 #endif
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(EIDOS_XBOX)
     SetUnhandledExceptionFilter(host_fault);
 #endif
     g_heap = SDL_CreateMutex();

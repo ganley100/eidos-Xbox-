@@ -1,14 +1,21 @@
 /*
- * host/switch/sdl2_side.c -- the SDL2 half of the Switch build's SDL
- * (host/switch/sw2.h says why there are two).  This file alone sees SDL2's
- * headers; host/switch/build.sh compiles it with SDL2's names renamed to
- * S2_SDL_*, as its library is.
+ * host/switch/sdl2_side.c -- the SDL2 half of the Switch and Xbox builds'
+ * SDL (host/switch/sw2.h says why there are two).  This file alone sees
+ * SDL2's headers.  On the Switch, host/switch/build.sh compiles it with
+ * SDL2's names renamed to S2_SDL_*, as its library is; on the Xbox it is a
+ * library of its own (eidos_sdl2.dll, host/xbox/CMakeLists.txt) that alone
+ * links SDL2, so the program never sees SDL2's names.
  */
 
 #include <stdio.h>
 #include <string.h>
+#if defined(EIDOS_XBOX)
+#include <SDL.h>
+#include <SDL_main.h>
+#else
 #include <SDL2/SDL.h>
 #include <switch.h>
+#endif
 
 #include "sw2.h"
 
@@ -27,7 +34,9 @@ int sw2_init(void)
         /* BSD sockets (host/net.c: multiplayer, Mystery Gift) need the
          * system's socket service started first */
         sockets = 1;
+#if defined(__SWITCH__)
         socketInitializeDefault();
+#endif
     }
     return SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER |
                     SDL_INIT_JOYSTICK | SDL_INIT_EVENTS | SDL_INIT_TIMER) == 0;
@@ -38,6 +47,31 @@ const char *sw2_error(void) { return SDL_GetError(); }
 uint64_t sw2_counter(void) { return SDL_GetPerformanceCounter(); }
 uint64_t sw2_frequency(void) { return SDL_GetPerformanceFrequency(); }
 void sw2_delay(uint32_t ms) { SDL_Delay(ms); }
+
+#if defined(EIDOS_XBOX)
+/* The UWP app: SDL2's CoreApplication runs `fn` as the program's main on
+ * the app's window thread.  The controller's B button is the system's
+ * "back", which takes an app that does not answer it to the dashboard:
+ * SDL answers it, and the game sees B as a button like any other. */
+int sw2_run_app(int (*fn)(int, char **))
+{
+    SDL_SetHint(SDL_HINT_WINRT_HANDLE_BACK_BUTTON, "1");
+    return SDL_WinRTRunApp(fn, NULL);
+}
+
+int sw2_pref_dir(char *out, size_t n)
+{
+    const char *dir = SDL_WinRTGetFSPathUTF8(SDL_WINRT_PATH_LOCAL_FOLDER);
+
+    if (dir == NULL || n == 0) {
+        return 0;
+    }
+    return SDL_snprintf(out, n, "%s\\", dir) < (int)n;
+}
+#else
+int sw2_run_app(int (*fn)(int, char **)) { return fn(0, NULL); }
+int sw2_pref_dir(char *out, size_t n) { (void)out; (void)n; return 0; }
+#endif
 
 /* ------------------------------------------------------------------ */
 /* The window and OpenGL (ES)                                          */

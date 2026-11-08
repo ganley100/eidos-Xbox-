@@ -1,6 +1,6 @@
 /*
- * host/switch/sw2.h -- the line between the Switch build's two halves of
- * SDL (docs/consoles.md).
+ * host/switch/sw2.h -- the line between the two halves of SDL in the
+ * Switch and Xbox builds (docs/consoles.md, docs/xbox.md).
  *
  * The host is written for SDL3 (host/sdl.c and the rest); devkitPro has
  * SDL2 for the Switch.  host/switch/sdl3_on_sdl2.c gives the host the SDL3
@@ -104,5 +104,11 @@ void sw2_unlock(void *m);
 void *sw2_cond(void);
 void sw2_cond_wait(void *c, void *m);
 void sw2_cond_broadcast(void *c);
+
+/* The Xbox (UWP, docs/xbox.md): SDL2 owns the app's entry and runs `fn`
+ * as its main; the app's own folder (its package's LocalState), with a
+ * trailing separator */
+int sw2_run_app(int (*fn)(int, char **));
+int sw2_pref_dir(char *out, size_t n);
 
 #endif

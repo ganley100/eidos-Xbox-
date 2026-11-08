@@ -1,0 +1,182 @@
+# The Xbox apps, "Pokemon Black" and "Pokemon White" (docs/xbox.md): UWP
+# packages for an Xbox One or Series console in Developer Mode.
+#
+#   Actions > xbox > Run workflow        (or a push that changes the Xbox
+#                                         build's files)
+#
+# The result is the "pokemon-xbox" artifact: the two .appx packages, the
+# certificate they are signed with, and Microsoft's VCLibs package they need.
+#
+# Stage one (Linux): the game module and its C (wasm2c, with bounds checks,
+# as the Switch's).  Stage two (Windows): MSVC for UWP compiles that C with
+# the host, SDL2 for UWP and ANGLE, and tools/xbox_package.py makes the apps.
+
+name: xbox
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - ".github/workflows/xbox.yml"
+      - "host/**"
+      - "tools/xbox_package.py"
+
+permissions:
+  contents: read
+
+env:
+  SDL2_VERSION: "2.32.10"
+  SDL2_SHA256: 5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165
+  ANGLE_VERSION: "2.1.14"
+  ANGLE_SHA256: 566f78d4fab2086e694dc8f1edcdb498ee549dade8a198ca95246cfdd0632e98
+
+jobs:
+  game:
+    name: the game as C
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    outputs:
+      version: ${{ steps.m.outputs.version }}
+    env:
+      EIDOS_WAMR_CACHE: ${{ github.workspace }}/.cache/wamr
+      EIDOS_MBEDTLS_CACHE: ${{ github.workspace }}/.cache/mbedtls
+      EIDOS_WASM_CACHE: ${{ github.workspace }}/.cache/wasm
+      EIDOS_SDL_CACHE: ${{ github.workspace }}/.cache/sdl
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        run: |
+          version=$(sed -n 's/^project(eidos VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          pin=$(sed -n 's/^set(EIDOS_ALETHEIA_PIN "\([0-9a-f]*\)").*/\1/p' cmake/aletheia_pin.cmake)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "pin=$pin" >> "$GITHUB_OUTPUT"
+          echo "eidos $version, aletheia $pin"
+      - uses: actions/checkout@v4
+        with:
+          repository: Project-Holon/aletheia
+          ref: ${{ steps.m.outputs.pin }}
+          token: ${{ secrets.ALETHEIA_TOKEN || github.token }}
+          path: aletheia
+      - name: Packages
+        run: sudo apt-get update -q && sudo apt-get install -y -q ninja-build
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: deps-xbox-game-${{ hashFiles('tools/fetch_sdl.py', 'tools/fetch_wamr.py', 'tools/fetch_mbedtls.py', 'tools/fetch_wasm.py') }}
+      - name: Fetch SDL3's headers, WAMR, Mbed TLS, the wasm toolchain (each is checked against a recorded SHA-256)
+        run: |
+          python3 tools/fetch_sdl.py --flavor mingw
+          python3 tools/fetch_wamr.py
+          python3 tools/fetch_mbedtls.py
+          python3 tools/fetch_wasm.py
+      - name: Stand-ins for the few ROM bytes the sources include (docs/release.md)
+        run: python3 tools/package_release.py placeholders --aletheia-root aletheia
+      - name: The game module (stage one)
+        run: |
+          python3 tools/build64.py --build-dir build64 --release --module-only \
+            --aletheia-root "$PWD/aletheia" \
+            --data-root "$PWD/no-game-data/extract/data"
+      - name: The game as C (wasm-opt, wasm2c, bounds checks) and its OpenGL imports
+        run: |
+          eval "$(python3 tools/fetch_wasm.py --locate | sed 's/^/export /')"
+          sdl=$(python3 tools/fetch_sdl.py --locate mingw)
+          cmake -S host -B build-gen -G Ninja \
+            -DEIDOS_WASM_MODULE="$PWD/build64/module/eidos_boot.wasm" \
+            -DWABT_ROOT="$WABT_ROOT" -DWASM2C="$WASM2C" -DWASM_OPT="$WASM_OPT" \
+            -DSDL3_PREFIX="$sdl" -DEIDOS_HOST_BOUNDS_CHECKS=ON -DEIDOS_HOST_PARTS=96
+          ninja -C build-gen game.h gl_imports.c
+          mkdir -p xbox-in/game xbox-in/wasm2c xbox-in/sdl3
+          cp build-gen/game_*.c build-gen/game.h build-gen/game-impl.h build-gen/gl_imports.c xbox-in/game/
+          cp -r "$WABT_ROOT/wasm2c/." xbox-in/wasm2c/
+          cp -r "$sdl/include/." xbox-in/sdl3/
+          du -sh xbox-in/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xbox-in
+          path: xbox-in
+          if-no-files-found: error
+          retention-days: 7
+
+  xbox:
+    name: the Xbox apps
+    needs: game
+    runs-on: windows-2022
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: xbox-in
+          path: xbox-in
+      # MSVC set up for UWP apps: the store CRT and WindowsApp.lib
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          uwp: true
+      - name: SDL2 for UWP (checked against its SHA-256)
+        shell: pwsh
+        run: |
+          $tgz = "SDL2-$env:SDL2_VERSION.tar.gz"
+          Invoke-WebRequest -Uri "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL2_VERSION/$tgz" -OutFile $tgz
+          if ((Get-FileHash $tgz -Algorithm SHA256).Hash -ne $env:SDL2_SHA256) { throw "SDL2: wrong SHA-256" }
+          tar -xzf $tgz
+          cmake -S "SDL2-$env:SDL2_VERSION" -B build-sdl2 -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0 `
+            -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF -DSDL2_DISABLE_SDL2MAIN=ON
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --build build-sdl2 --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --install build-sdl2 --config Release --prefix "$PWD/sdl2-uwp"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem -Recurse sdl2-uwp -Include *.dll,*.lib | ForEach-Object { $_.FullName }
+      - name: ANGLE for UWP (checked against its SHA-256)
+        shell: pwsh
+        run: |
+          $pkg = "angle.windowsstore.$env:ANGLE_VERSION.nupkg"
+          Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/angle.windowsstore/$env:ANGLE_VERSION/$pkg" -OutFile angle.zip
+          if ((Get-FileHash angle.zip -Algorithm SHA256).Hash -ne $env:ANGLE_SHA256) { throw "ANGLE: wrong SHA-256" }
+          Expand-Archive angle.zip -DestinationPath angle
+          Get-ChildItem angle/bin/UAP/x64
+      - name: The Xbox program (MSVC, UWP)
+        shell: pwsh
+        run: |
+          cmake -S host/xbox -B build-xbox -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            -DEIDOS_GAME_DIR="$PWD/xbox-in/game" -DWABT_ROOT="$PWD/xbox-in" `
+            -DSDL3_INCLUDE="$PWD/xbox-in/sdl3" -DSDL2_PREFIX="$PWD/sdl2-uwp"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # SDL2's half and the host first, so a mistake there shows in
+          # minutes, before the generated C's long compile
+          cmake --build build-xbox --target eidos_sdl2 eidos_host -- -k 0
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --build build-xbox --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem build-xbox/*.exe, build-xbox/*.dll
+      - name: A signing certificate (self-signed; Developer Mode installs it with the apps)
+        shell: pwsh
+        run: |
+          $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=eidos" `
+            -KeyUsage DigitalSignature -FriendlyName "eidos Xbox" `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          $pw = ConvertTo-SecureString -String "eidos" -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath eidos-xbox.pfx -Password $pw | Out-Null
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Export-Certificate -Cert $cert -FilePath dist/eidos-xbox.cer | Out-Null
+      - name: The two apps
+        shell: pwsh
+        run: |
+          python tools/xbox_package.py --build-dir build-xbox `
+            --sdl2-dll sdl2-uwp/bin/SDL2.dll --angle-dir angle/bin/UAP/x64 `
+            --version "${{ needs.game.outputs.version }}" --out dist `
+            --pfx eidos-xbox.pfx --pfx-password eidos --publisher "CN=eidos"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $vclibs = "${env:ProgramFiles(x86)}\Microsoft SDKs\Windows Kits\10\ExtensionSDKs\Microsoft.VCLibs\14.0\Appx\Retail\x64\Microsoft.VCLibs.x64.14.00.appx"
+          if (Test-Path $vclibs) { Copy-Item $vclibs dist/ } else { Write-Warning "no VCLibs package at $vclibs" }
+          Copy-Item docs/xbox.md dist/README-xbox.md
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pokemon-xbox
+          path: dist
+          if-no-files-found: error

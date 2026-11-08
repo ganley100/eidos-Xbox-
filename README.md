@@ -36,6 +36,8 @@ Experimental builds are available on the [Releases page](https://github.com/Proj
 - **Nintendo Switch:** Extract `eidos-<version>-switch.zip` to the root of your SD card, place your `.nds` ROM in `sdmc:/switch/eidos/`, and launch eidos from the Homebrew Menu using title takeover (hold **R** while launching a game) for full memory access.
 - **PlayStation Vita:** Install `eidos-<version>-vita.vpk` via VitaShell and copy your `.nds` ROM to `ux0:data/eidos/`. Hardware-accelerated rendering requires `libshacccg.suprx` in `ur0:data/`.
 
+- **Xbox One / Series (Developer Mode):** The **xbox** workflow builds two apps, **Pokemon Black** and **Pokemon White** (one-screen layout, controller), installed through the Xbox Device Portal; each takes its own game's ROM, uploaded to the app's folder. Experimental and untested on hardware; see `docs/xbox.md`.
+
 On first launch, eidos verifies the ROM in that directory and extracts the required game data.
 
 ## Supported ROMs

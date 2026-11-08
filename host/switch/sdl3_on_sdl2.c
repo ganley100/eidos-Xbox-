@@ -1,6 +1,7 @@
 /*
  * host/switch/sdl3_on_sdl2.c -- the SDL3 functions the host calls, on the
- * Switch, where devkitPro has SDL2 only (host/switch/sw2.h).
+ * Switch, where devkitPro has SDL2 only, and on the Xbox, where SDL2 is the
+ * last SDL with a UWP port (host/switch/sw2.h, docs/xbox.md).
  *
  * Built with SDL3's headers, so the types the host and the game see are
  * SDL3's own: an event is written in SDL3's layout (the host copies its
@@ -18,6 +19,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#if defined(EIDOS_XBOX)
+#include <direct.h>
+#define mkdir(path, mode) _mkdir(path)
+#endif
 
 #include <SDL3/SDL.h>
 
@@ -68,11 +73,19 @@ void SDL_Quit(void)
 
 void SDL_SetMainReady(void) {}
 bool SDL_SetHint(const char *name, const char *value) { (void)name; (void)value; return true; }
+#if defined(EIDOS_XBOX)
+const char *SDL_GetPlatform(void) { return "Xbox"; }
+const char *SDL_GetCurrentVideoDriver(void) { return "winrt"; }
+
+/* a game in Developer Mode has four of the Xbox One's cores */
+int SDL_GetNumLogicalCPUCores(void) { return 4; }
+#else
 const char *SDL_GetPlatform(void) { return "Nintendo Switch"; }
 const char *SDL_GetCurrentVideoDriver(void) { return "switch"; }
 
 /* an application has cores 0 to 2; the system keeps the fourth */
 int SDL_GetNumLogicalCPUCores(void) { return 3; }
+#endif
 
 Uint64 SDL_GetPerformanceCounter(void) { return sw2_counter(); }
 Uint64 SDL_GetPerformanceFrequency(void) { return sw2_frequency(); }
@@ -105,12 +118,14 @@ bool SDL_CreateDirectory(const char *path)
     size_t i;
 
     snprintf(buf, sizeof buf, "%s", path);
-    /* each parent first, past the device name ("sdmc:/") */
+    /* each parent first, past the device name ("sdmc:/", "C:\\") */
     for (i = 1; buf[i] != '\0'; i++) {
-        if (buf[i] == '/' && buf[i - 1] != ':') {
+        if ((buf[i] == '/' || buf[i] == '\\') && buf[i - 1] != ':') {
+            char sep = buf[i];
+
             buf[i] = '\0';
             mkdir(buf, 0777);
-            buf[i] = '/';
+            buf[i] = sep;
         }
     }
     if (mkdir(buf, 0777) != 0 && errno != EEXIST) {
@@ -123,8 +138,21 @@ char *SDL_GetPrefPath(const char *org, const char *app)
 {
     (void)org;
     (void)app;
+#if defined(EIDOS_XBOX)
+    {
+        /* the app's own folder: its package's LocalState */
+        char dir[1024];
+
+        if (!sw2_pref_dir(dir, sizeof dir)) {
+            fail("no folder for the app");
+            return NULL;
+        }
+        return strdup(dir);
+    }
+#else
     SDL_CreateDirectory(SWITCH_DIR);
     return strdup(SWITCH_DIR);
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -765,7 +793,11 @@ Sint16 SDL_GetGamepadAxis(SDL_Gamepad *pad, SDL_GamepadAxis a) { return (Sint16)
 SDL_GamepadType SDL_GetGamepadTypeForID(SDL_JoystickID id)
 {
     (void)id;
+#if defined(EIDOS_XBOX)
+    return SDL_GAMEPAD_TYPE_XBOXONE;
+#else
     return SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO;
+#endif
 }
 
 /* SDL's own names for the buttons and axes (its mapping strings) */

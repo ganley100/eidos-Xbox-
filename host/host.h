@@ -80,6 +80,10 @@ extern unsigned host_gl_window_fbo;
  * bw_pick_rom. */
 int host_pick_rom(const char *title, char *out, size_t n);
 
+/* The Xbox (host/xbox/xbox_host.c): which game this app is, "Black",
+ * "White", or "" when it takes either. */
+const char *host_xbox_edition(void);
+
 #if defined(__APPLE__)
 /* host/ios_view.m: the home indicator hidden, its swipe deferred (iOS). */
 void host_ios_view_setup(void);

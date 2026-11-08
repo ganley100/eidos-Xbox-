@@ -6,7 +6,7 @@ tools/build64.py -- the 64-bit game program, both stages (docs/lp64.md,
     python tools/build64.py --build-dir build64 [--release]
         [--aletheia-root DIR] [--data-root DIR] [--sdl3-prefix DIR]
         [--cc HOST-CC] [--relay URL] [--fetch] [--fast] [--parts N]
-        [--host-jobs N]
+        [--host-jobs N] [--module-only]
 
 --fast is for testing: the generated C at -O1, in 96 smaller files, 8
 compiled at once.  Releases keep the default (-O2, 32 files, 4 at once).
@@ -90,6 +90,9 @@ def main():
     ap.add_argument("--parts", type=int, default=None,
                     help="how many C files wasm2c writes (EIDOS_HOST_PARTS); "
                          "smaller files need less memory each")
+    ap.add_argument("--module-only", action="store_true",
+                    help="stage one alone (the module, for a program built "
+                         "elsewhere: the phones, the consoles)")
     ap.add_argument("--host-jobs", type=int, default=None,
                     help="stage two's parallel compiles: each generated file takes "
                          "1-2 GB to compile")
@@ -101,7 +104,7 @@ def main():
     jobs = a.host_jobs if a.host_jobs is not None else (8 if a.fast else 4)
 
     t = tool_paths(a.fetch)
-    sdl = sdl3_prefix(a.sdl3_prefix)
+    sdl = None if a.module_only else sdl3_prefix(a.sdl3_prefix)
     build = os.path.abspath(a.build_dir)
     mod, host = os.path.join(build, "module"), os.path.join(build, "host")
     gen = ["-G", "Ninja"] if shutil.which("ninja") else []
@@ -137,6 +140,8 @@ def main():
         args.append("-DEIDOS_DEFAULT_RELAY=%s" % a.relay)
     run(args)
     run(["cmake", "--build", mod, "--target", "eidos_boot"])
+    if a.module_only:
+        return 0
 
     # stage two: the program
     args = ["cmake", "-S", os.path.join(ROOT, "host"), "-B", host] + gen + [
