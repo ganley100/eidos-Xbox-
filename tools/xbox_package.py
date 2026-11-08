@@ -36,7 +36,8 @@ TILES = ("Square44x44Logo", "Square150x150Logo", "StoreLogo", "Wide310x150Logo",
 MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-         IgnorableNamespaces="uap">
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap rescap">
   <Identity Name="{name}" Publisher="{publisher}" Version="{version}"
             ProcessorArchitecture="x64" />
   <Properties>
@@ -71,6 +72,8 @@ MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
     <Capability Name="internetClient" />
     <Capability Name="internetClientServer" />
     <Capability Name="privateNetworkClientServer" />
+    <!-- the ROM from the Xbox's DevelopmentFiles folder (host/xbox/xbox_host.c) -->
+    <rescap:Capability Name="broadFileSystemAccess" />
   </Capabilities>
 </Package>
 """

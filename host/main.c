@@ -434,8 +434,9 @@ static char **mobile_args(int *argc)
         static char where[1400];
         const char *ed = host_xbox_edition();
 
-        snprintf(where, sizeof where, "%s\n(Device Portal > File explorer > LocalAppData > "
-                 "the Pokemon%s package > LocalState)", pref, ed);
+        snprintf(where, sizeof where, "DevelopmentFiles\\Pokemon\n(Device Portal > File explorer > "
+                 "DevelopmentFiles: make a folder named Pokemon there and upload your "
+                 "Pokemon%s ROM to it)", ed[0] ? (ed[0] == 'B' ? " Black" : " White") : "");
         setenv("EIDOS_CONSOLE", "Xbox", 1);
         setenv("EIDOS_ROM_FOLDER", where, 1);
     }

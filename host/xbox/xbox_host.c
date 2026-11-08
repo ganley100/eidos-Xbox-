@@ -17,6 +17,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <fileapifromapp.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -141,19 +142,21 @@ const char *host_xbox_edition(void)
 
 /* The ROM's game code (its header's bytes 0x0C to 0x0F): IRBx is Pokemon
  * Black, IRAx Pokemon White, x the region.  'B', 'W', or 0 for anything
- * else. */
+ * else.  The "FromApp" calls reach outside the app's own folder
+ * (DevelopmentFiles), as the C library's do not. */
 static char rom_edition(const wchar_t *path)
 {
-    FILE *f = _wfopen(path, L"rb");
+    HANDLE f = CreateFile2FromAppW(path, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, NULL);
     unsigned char hdr[16];
-    size_t got;
+    DWORD got = 0;
+    BOOL ok;
 
-    if (f == NULL) {
+    if (f == INVALID_HANDLE_VALUE) {
         return 0;
     }
-    got = fread(hdr, 1, sizeof hdr, f);
-    fclose(f);
-    if (got != sizeof hdr || hdr[12] != 'I' || hdr[13] != 'R') {
+    ok = ReadFile(f, hdr, sizeof hdr, &got, NULL);
+    CloseHandle(f);
+    if (!ok || got != sizeof hdr || hdr[12] != 'I' || hdr[13] != 'R') {
         return 0;
     }
     return hdr[14] == 'B' ? 'B' : hdr[14] == 'A' ? 'W' : 0;
@@ -163,15 +166,50 @@ static char rom_edition(const wchar_t *path)
 /* The ROM "dialog" (install/picker.h's bw_pick_rom)                   */
 /* ------------------------------------------------------------------ */
 
-/* No file list an app can open on the Xbox: the ROM is a file the player
- * uploads to the app's folder.  The first .nds file there of this app's
- * game is the answer. */
+/* The folders searched for the ROM, in order: the Xbox's DevelopmentFiles
+ * folder (the Device Portal's file explorer and its network share reach
+ * it; the package's broadFileSystemAccess lets the app read it), then the
+ * app's own folder.  The first .nds file of this app's game is the answer. */
+#define XBOX_DEV_DIR L"D:\\DevelopmentFiles\\"
+#define XBOX_DEV_DIR_POKEMON L"D:\\DevelopmentFiles\\Pokemon\\"
+
+/* the first .nds of game `want` (0: any) in `wdir` (with its trailing
+ * backslash) into `full`; 1 found, 0 none, and *other set when a ROM of
+ * the other game is there */
+static int find_rom(const wchar_t *wdir, char want, wchar_t *full, size_t n, int *other)
+{
+    wchar_t pattern[1100];
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+
+    _snwprintf(pattern, 1100, L"%s*.nds", wdir);
+    h = FindFirstFileExFromAppW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, 0);
+    if (h == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+    do {
+        char got;
+
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            continue;
+        }
+        _snwprintf(full, n, L"%s%s", wdir, fd.cFileName);
+        got = rom_edition(full);
+        if (want != 0 && got != want) {
+            *other = 1;
+            continue;
+        }
+        FindClose(h);
+        return 1;
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return 0;
+}
+
 int host_pick_rom(const char *title, char *out, size_t n)
 {
     char dir[1024];
-    wchar_t wdir[1024], pattern[1100], full[1600];
-    WIN32_FIND_DATAW fd;
-    HANDLE h;
+    wchar_t wdir[1024], full[1600], local[1100];
     const char *ed = host_xbox_edition();
     char want = ed[0] == 'B' ? 'B' : ed[0] == 'W' ? 'W' : 0;
     int other = 0;
@@ -185,33 +223,35 @@ int host_pick_rom(const char *title, char *out, size_t n)
         snprintf(out, n, "This app's folder cannot be found.");
         return BW_PICK_UNAVAILABLE;
     }
-    _snwprintf(pattern, 1100, L"%s*.nds", wdir);
-    h = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, 0);
-    if (h != INVALID_HANDLE_VALUE) {
-        do {
-            char got;
+    if (find_rom(XBOX_DEV_DIR_POKEMON, want, full, 1600, &other) ||
+        find_rom(XBOX_DEV_DIR, want, full, 1600, &other)) {
+        /* The game reads the ROM with the C library, which cannot open a
+         * file outside the app's folder: a copy goes there, once (the
+         * first run extracts the game data from it and is done with it). */
+        WIN32_FILE_ATTRIBUTE_DATA a, b;
 
-            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-                continue;
+        _snwprintf(local, 1100, L"%srom-%hs.nds", wdir, want == 'W' ? "white" : "black");
+        if (!GetFileAttributesExFromAppW(local, GetFileExInfoStandard, &b) ||
+            !GetFileAttributesExFromAppW(full, GetFileExInfoStandard, &a) ||
+            a.nFileSizeLow != b.nFileSizeLow || a.nFileSizeHigh != b.nFileSizeHigh) {
+            fprintf(stderr, "eidos: copying the ROM from DevelopmentFiles\n");
+            if (!CopyFileFromAppW(full, local, FALSE)) {
+                snprintf(out, n, "The ROM in DevelopmentFiles cannot be copied to %s "
+                         "(error %lu).", dir, (unsigned long)GetLastError());
+                return BW_PICK_UNAVAILABLE;
             }
-            _snwprintf(full, 1600, L"%s%s", wdir, fd.cFileName);
-            got = rom_edition(full);
-            if (want != 0 && got != want) {
-                other = 1;
-                continue;
-            }
-            if (narrow(full, out, n) == 0) {
-                FindClose(h);
-                return BW_PICK_OK;
-            }
-        } while (FindNextFileW(h, &fd));
-        FindClose(h);
+        }
+        return narrow(local, out, n) == 0 ? BW_PICK_OK : BW_PICK_UNAVAILABLE;
+    }
+    if (find_rom(wdir, want, full, 1600, &other)) {
+        return narrow(full, out, n) == 0 ? BW_PICK_OK : BW_PICK_UNAVAILABLE;
     }
     if (other) {
-        snprintf(out, n, "This is the Pokemon %s app, and the ROM in its folder is not "
-                 "Pokemon %s. Upload a Pokemon %s ROM (.nds) to %s", ed, ed, ed, dir);
+        snprintf(out, n, "This is the Pokemon %s app, and the ROM found is not "
+                 "Pokemon %s. Put a Pokemon %s ROM (.nds) in DevelopmentFiles\\Pokemon.",
+                 ed, ed, ed);
     } else {
-        snprintf(out, n, "No .nds file in %s", dir);
+        snprintf(out, n, "No .nds file in DevelopmentFiles\\Pokemon, DevelopmentFiles or %s", dir);
     }
     return BW_PICK_UNAVAILABLE;
 }

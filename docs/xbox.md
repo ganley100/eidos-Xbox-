@@ -44,21 +44,30 @@ its **pokemon-xbox** artifact, a zip that holds:
 
 ## Adding the ROMs
 
-Each app has its own folder, and the ROM goes there:
+Put the ROMs in the Xbox's **DevelopmentFiles** folder. Both apps look
+there, each for its own game:
 
-1. Start the app once. It shows "Pokemon Black or White is needed" and
-   the folder's path.
-2. In Device Portal, open **File explorer > LocalAppData >
-   eidos.PokemonBlack_... > LocalState** and upload your Pokemon Black
-   `.nds` file. Use the White app's folder (`eidos.PokemonWhite_...`) for
-   Pokemon White.
-3. In the app, choose **Look again**. It checks the ROM and extracts the
-   game data once, which takes a while. Then the game starts.
+1. In Device Portal, open **File explorer > DevelopmentFiles**, make a
+   folder named **Pokemon**, and upload your Pokemon Black and Pokemon White
+   `.nds` files into it. The top of DevelopmentFiles works too.
+2. Start the app (or choose **Look again** if it is already open). The
+   Pokemon Black app takes the Black ROM and the Pokemon White app the White
+   one. They tell the two apart by the game code in the ROM's header (IRB is
+   Black, IRA is White). English, French, German, Italian and Spanish ROMs
+   are supported.
+3. The first run copies the ROM into the app's own folder (the game reads
+   its files with the C library, which cannot open DevelopmentFiles) and
+   extracts the game data from it once, which takes a while. Then the game
+   starts. A later run copies the ROM again only if the one in
+   DevelopmentFiles has a different size.
 
-The Pokemon Black app takes only a Pokemon Black ROM, and the White app
-only a White one. It reads the game code in the ROM's header: IRB for
-Black, IRA for White. English, French, German, Italian and Spanish ROMs
-are supported.
+The app's own folder works as well: **LocalAppData >
+eidos.PokemonBlack_... > LocalState** (or the White app's). The apps check
+DevelopmentFiles\Pokemon first, then DevelopmentFiles, then LocalState.
+
+Reading DevelopmentFiles needs the package's `broadFileSystemAccess`
+capability, which Developer Mode allows for sideloaded apps. If the app
+does not find the ROM there, use LocalState instead.
 
 ## Playing
 
