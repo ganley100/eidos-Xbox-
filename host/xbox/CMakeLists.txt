@@ -122,7 +122,8 @@ set_source_files_properties(${_host} PROPERTIES
 # the generated files are large
 set_source_files_properties(${_game} PROPERTIES COMPILE_OPTIONS "/bigobj")
 # kernel32.lib after WindowsApp.lib: only what WindowsApp.lib lacks (the
-# fibers, host/fiber.c) comes from it
-target_link_libraries(eidos PRIVATE eidos_sdl2 ws2_32.lib bcrypt.lib kernel32.lib)
+# fibers, host/fiber.c) comes from it, the rest from the API sets a UWP
+# app imports
+target_link_libraries(eidos PRIVATE eidos_sdl2 WindowsApp.lib kernel32.lib)
 # a stack of 8 MiB for the program's thread, as the desktop's
 target_link_options(eidos PRIVATE /STACK:8388608)
