@@ -58,26 +58,38 @@ jobs:
           ref: ${{ steps.m.outputs.pin }}
           token: ${{ secrets.ALETHEIA_TOKEN || github.token }}
           path: aletheia
+      # the game's C from an earlier run with the same sources
+      - id: reuse
+        uses: actions/cache@v4
+        with:
+          path: xbox-in
+          key: xbox-game-${{ steps.m.outputs.pin }}-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'engine/**', 'sdk/**', 'demo/**', 'install/**', 'mod/**', 'host/CMakeLists.txt', 'tools/*.py', '!tools/xbox_package.py') }}
       - name: Packages
+        if: steps.reuse.outputs.cache-hit != 'true'
         run: sudo apt-get update -q && sudo apt-get install -y -q ninja-build
       - uses: actions/cache@v4
+        if: steps.reuse.outputs.cache-hit != 'true'
         with:
           path: .cache
           key: deps-xbox-game-${{ hashFiles('tools/fetch_sdl.py', 'tools/fetch_wamr.py', 'tools/fetch_mbedtls.py', 'tools/fetch_wasm.py') }}
       - name: Fetch SDL3's headers, WAMR, Mbed TLS, the wasm toolchain (each is checked against a recorded SHA-256)
+        if: steps.reuse.outputs.cache-hit != 'true'
         run: |
           python3 tools/fetch_sdl.py --flavor mingw
           python3 tools/fetch_wamr.py
           python3 tools/fetch_mbedtls.py
           python3 tools/fetch_wasm.py
       - name: Stand-ins for the few ROM bytes the sources include (docs/release.md)
+        if: steps.reuse.outputs.cache-hit != 'true'
         run: python3 tools/package_release.py placeholders --aletheia-root aletheia
       - name: The game module (stage one)
+        if: steps.reuse.outputs.cache-hit != 'true'
         run: |
           python3 tools/build64.py --build-dir build64 --release --module-only \
             --aletheia-root "$PWD/aletheia" \
             --data-root "$PWD/no-game-data/extract/data"
       - name: The game as C (wasm-opt, wasm2c, bounds checks) and its OpenGL imports
+        if: steps.reuse.outputs.cache-hit != 'true'
         run: |
           eval "$(python3 tools/fetch_wasm.py --locate | sed 's/^/export /')"
           sdl=$(python3 tools/fetch_sdl.py --locate mingw)
@@ -122,8 +134,8 @@ jobs:
           if ((Get-FileHash $tgz -Algorithm SHA256).Hash -ne $env:SDL2_SHA256) { throw "SDL2: wrong SHA-256" }
           tar -xzf $tgz
           cmake -S "SDL2-$env:SDL2_VERSION" -B build-sdl2 -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0 `
-            -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF -DSDL2_DISABLE_SDL2MAIN=ON
+            "-DCMAKE_SYSTEM_NAME=WindowsStore" "-DCMAKE_SYSTEM_VERSION=10.0" `
+            "-DSDL_SHARED=ON" "-DSDL_STATIC=OFF" "-DSDL_TEST=OFF" "-DSDL2_DISABLE_SDL2MAIN=ON"
           if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake --build build-sdl2 --config Release --parallel
           if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -141,9 +153,9 @@ jobs:
       - name: The Xbox program (MSVC, UWP)
         shell: pwsh
         run: |
-          cmake -S host/xbox -B build-xbox -G Ninja -DCMAKE_BUILD_TYPE=Release `
-            -DEIDOS_GAME_DIR="$PWD/xbox-in/game" -DWABT_ROOT="$PWD/xbox-in" `
-            -DSDL3_INCLUDE="$PWD/xbox-in/sdl3" -DSDL2_PREFIX="$PWD/sdl2-uwp"
+          cmake -S host/xbox -B build-xbox -G Ninja "-DCMAKE_BUILD_TYPE=Release" `
+            "-DEIDOS_GAME_DIR=$PWD/xbox-in/game" "-DWABT_ROOT=$PWD/xbox-in" `
+            "-DSDL3_INCLUDE=$PWD/xbox-in/sdl3" "-DSDL2_PREFIX=$PWD/sdl2-uwp"
           if ($LASTEXITCODE -ne 0) { exit 1 }
           # SDL2's half and the host first, so a mistake there shows in
           # minutes, before the generated C's long compile
