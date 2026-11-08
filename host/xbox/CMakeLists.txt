@@ -53,9 +53,27 @@ set(_sw ${_root}/host/switch)
 # for the system's functions (the UWP prompt's LIB has the store CRT).
 add_compile_definitions(WINAPI_FAMILY=WINAPI_FAMILY_APP _CRT_SECURE_NO_WARNINGS
     _CRT_NONSTDC_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS EIDOS_XBOX=1)
-add_compile_options(/std:c17 /utf-8 /MD /W1 /wd4005)
-add_link_options(/APPCONTAINER /NODEFAULTLIB:kernel32.lib /NODEFAULTLIB:user32.lib
-    /NODEFAULTLIB:ole32.lib /DYNAMICBASE /NXCOMPAT /DEBUG /OPT:REF /OPT:ICF)
+# C11 atomics: wasm2c's runtime declares them (MSVC 17.5 and later)
+add_compile_options(/std:c17 /experimental:c11atomics /utf-8 /MD /W1 /wd4005)
+add_link_options(/APPCONTAINER /NODEFAULTLIB:user32.lib /NODEFAULTLIB:ole32.lib
+    /DYNAMICBASE /NXCOMPAT /DEBUG /OPT:REF /OPT:ICF)
+
+# SDL3's headers stop a UWP build ("no longer supported"); the host needs
+# only their types and names, which are Windows's, so a copy of them
+# without that stop is what the host includes.
+file(GLOB _sdl3_headers ${SDL3_INCLUDE}/SDL3/*.h)
+foreach(_h ${_sdl3_headers})
+    get_filename_component(_n ${_h} NAME)
+    file(READ ${_h} _text)
+    string(REPLACE "#if WINAPI_FAMILY_WINRT\n#error Windows RT/UWP is no longer supported in SDL"
+                   "#if 0 /* host/xbox: SDL3's types on UWP */" _text "${_text}")
+    file(WRITE ${CMAKE_BINARY_DIR}/sdl3/SDL3/${_n} "${_text}")
+endforeach()
+file(READ ${CMAKE_BINARY_DIR}/sdl3/SDL3/SDL_platform_defines.h _text)
+if(_text MATCHES "no longer supported")
+    message(FATAL_ERROR "SDL3's UWP stop is spelled otherwise now: update host/xbox/CMakeLists.txt")
+endif()
+set(SDL3_INCLUDE ${CMAKE_BINARY_DIR}/sdl3)
 
 # ------------------------------------------------------------ SDL2's half
 add_library(eidos_sdl2 SHARED ${_sw}/sdl2_side.c)
@@ -103,6 +121,8 @@ set_source_files_properties(${_host} PROPERTIES
     COMPILE_OPTIONS "/FI${_here}/xbox_compat.h")
 # the generated files are large
 set_source_files_properties(${_game} PROPERTIES COMPILE_OPTIONS "/bigobj")
-target_link_libraries(eidos PRIVATE eidos_sdl2 ws2_32.lib bcrypt.lib)
+# kernel32.lib after WindowsApp.lib: only what WindowsApp.lib lacks (the
+# fibers, host/fiber.c) comes from it
+target_link_libraries(eidos PRIVATE eidos_sdl2 ws2_32.lib bcrypt.lib kernel32.lib)
 # a stack of 8 MiB for the program's thread, as the desktop's
 target_link_options(eidos PRIVATE /STACK:8388608)

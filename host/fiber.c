@@ -54,6 +54,16 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 typedef void *NativeFiber;
+#if defined(EIDOS_XBOX)
+/* A UWP app's headers leave the fibers out (the desktop's family); the
+ * system has them, and the Xbox build links them from kernel32.lib
+ * (host/xbox/CMakeLists.txt). */
+WINBASEAPI LPVOID WINAPI ConvertThreadToFiber(LPVOID param);
+WINBASEAPI LPVOID WINAPI CreateFiberEx(SIZE_T commit, SIZE_T reserve, DWORD flags,
+                                       VOID (WINAPI *start)(LPVOID), LPVOID param);
+WINBASEAPI VOID WINAPI SwitchToFiber(LPVOID fiber);
+WINBASEAPI VOID WINAPI DeleteFiber(LPVOID fiber);
+#endif
 #elif defined(HOST_FIBER_ASM)
 #include <time.h>
 typedef struct { void *sp; void *stack; } *NativeFiber;
