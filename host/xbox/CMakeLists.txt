@@ -21,10 +21,11 @@
 
 cmake_minimum_required(VERSION 3.20)
 # a UWP program's system library is WindowsApp.lib, not kernel32.lib and the
-# rest (the store CRT needs RoInitialize from it): CMake's own compiler
-# check links with these too
-set(CMAKE_C_STANDARD_LIBRARIES "WindowsApp.lib" CACHE STRING "" FORCE)
+# rest (the store CRT needs RoInitialize from it).  CMake's compiler check
+# links a desktop program with the store CRT, which fails, so it is skipped.
+set(CMAKE_C_COMPILER_WORKS 1)
 project(eidos_xbox C)
+set(CMAKE_C_STANDARD_LIBRARIES "WindowsApp.lib")
 
 set(EIDOS_GAME_DIR "" CACHE PATH "a host build holding game_*.c, game.h and gl_imports.c")
 set(WABT_ROOT "" CACHE PATH "wabt's source tree (its wasm2c/ runtime)")
